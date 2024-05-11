@@ -1,0 +1,114 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{ctex}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[binary-units]{siunitx}
+\usepackage{capt-of}
+\usepackage{imakeidx}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    citecolor=black,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+    pdftitle={OS Case Study},
+    pdfpagemode=FullScreen,
+    }
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{trees}
+\usepackage{listings}
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2
+}
+\lstset{style=mystyle}
+\usepackage{footmisc}
+\usepackage{biblatex}
+\usepackage[most]{tcolorbox}
+\newtcolorbox{notebox}[0]{colback=yellow!5!white,
+colframe=yellow!75!black,fonttitle=\bfseries,parbox=false,breakable,
+title={Note}}
+\newtcolorbox[auto counter, number within=section, list inside=question]{qbox}[1]{colback=blue!5!white,
+colframe=blue!75!black,fonttitle=\bfseries,parbox=false,breakable,
+title={小问题~\thetcbcounter：#1}}
+\newtcolorbox[auto counter, number within=section, list inside=src]{readsrcbox}[1]{colback=green!5!white,
+colframe=green!75!black,fonttitle=\bfseries,parbox=false,breakable,
+title={读源码~\thetcbcounter：#1}}
+\usepackage{csquotes}
+
+\newcommand{\onlinesrc}[2]{\href{#1#2}{\lstinline{#2}}}
+\newcommand{\linuxsrc}[1]
+{\onlinesrc{https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/}{#1}}
+\newcommand{\archlinuxconf}[2]{\href{https://github.com/archlinux/svntogit-packages/blob/974377e2b1ab9e822c71fbb05a82bfb8dd9a7971/trunk/config\#L#1}{#2}}
+
+\addbibresource{bib.bib}
+\date{\today}
+\title{OS Case Study\\Arch Linux (Linux 5.18)}
+\author{Liao Junxuan}
+\makeindex[intoc, columnseprule, options= -s style.ist]
+\begin{document}
+\lstset{
+	breaklines=true,
+	basicstyle=\ttfamily}
+
+\maketitle
+\tableofcontents
+
+\newpage
+
+\include{history_zh}
+
+\include{module_zh}
+
+\include{task_zh}
+
+\include{mem_zh}
+
+\include{device_zh}
+
+\include{fs_zh}
+
+\section{附录}
+\tcblistof[\subsection]{question}{“小问题”列表}
+\tcblistof[\subsection]{src}{“读源码”列表}
+
+\printbibliography[heading=bibintoc]
+
+\printindex
+
+\newpage
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

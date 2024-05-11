@@ -1,0 +1,219 @@
+\section{ext4文件系统}
+ext4\index{ext4}是近年许多GNU/Linux发行版的默认文件系统，于2008年在内核中稳定
+\footnote{\url{https://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=03010a3350301baac2154fa66de925ae2981b7e3}}，
+是较为传统的日志文件系统，而不是BTRFS、ZFS那样的集成了卷管理器的文件系统，
+但功能也较为完善.
+
+\subsection{文件系统的系统调用}
+Linux支持的文件系统种类非常丰富.
+在处理多种文件系统共存和代码复用的问题上 Linux 内核采用了实现一个叫做
+“虚拟文件系统”的软件层的方法.
+
+虚拟文件系统把文件系统中共有的概念抽象出来，规定了统一的对象和接口，
+特定的文件实现自己的算法和数据结构来提供这些对象，例如：
+\begin{itemize}
+	\item Superblock. 整个文件系统的控制信息.
+	\item Inode. 文件的控制信息.
+	\item File. 已打开的文件的控制信息.
+	\item Dcache. 目录条目的缓存.
+\end{itemize}
+有了这些通用的对象，文件系统就可以把自己注册到Linux的虚拟文件系统中，
+虚拟文件系统对内通过调用这些对象的方法来完成特定文件系统中的操作，
+对外提供系统调用，使用户态程序能够用同样的方式操作不同的文件系统.
+文件系统的挂载和卸载是系统调用.
+
+常用的读写文件的系统调用包括但不限于：
+\begin{itemize}
+	\item \lstinline{open} 打开已有的文件或者在文件系统中创建一个新的文件并打开，
+	      返回文件描述符；
+	\item \lstinline{read} 从已打开的文件读出内容放入缓冲区；
+	\item \lstinline{write} 向已打开的文件中写入内容；
+	\item \lstinline{poll} 检查文件是否有活动，进程可以在没有活动时等待；
+	\item \lstinline{ioctl} 控制读写文件的方式；
+	\item \lstinline{mmap} 把文件映射到用户的虚拟内存空间中，
+	      从而通过读写内存的方式读写文件；
+\end{itemize}
+
+常用的管理文件的系统调用包括但不限于：
+\begin{itemize}
+	\item \lstinline{creat} 创建文件；
+	\item \lstinline{link} 创建硬链接，
+	      实现上一般是使不同的目录条目指向同一个inode；
+	\item \lstinline{unlink} 删除inode的某“名字”
+	      ，当没有其他引用时（如文件描述符、其他硬链接等），inode会被删除；
+	\item \lstinline{mkdir} 创建目录；
+	\item \lstinline{rmdir} 删除目录；
+	\item \lstinline{rename} 对inode “重命名”，可以把文件移动到别的目录；
+	\item \lstinline{stat} 从inode中读取信息；
+	\item \lstinline{chmod} 更改文件的权限.
+\end{itemize}
+
+\begin{qbox}{系统调用的文档在哪里查？}
+	Linux 的 man 手册的第二节是系统调用，
+	可以用命令 \lstinline{man 2 read} 查看 \lstinline{read(2)} 的相关内容.
+	在POSIX的标准中也可以查到系统调用的规定.
+\end{qbox}
+
+\subsection{磁盘空间和文件的组织}
+\subsubsection{存储单元} \label{fs units}
+ext4中，磁盘的空间被分为几种单位：sector、block和block group.
+\begin{itemize}
+	\item sector 是由硬盘决定的扇区，一般为512 B.\index{sector}
+	      较新（2010后）硬盘一般扇区大小为4096 B，
+	      可以工作在4 KB 的原生扇区大小模式下，
+	      也可以模拟512 B的扇区大小.
+	\item block 是2的整数次幂个连续扇区组成的单元，\index{block}
+	      一次传输较多数据可以减小磁盘操作开销.
+	      一般是4 KB，为了匹配常见的内存页面的大小.
+	      默认开启64位特性时，一个文件系统可以有 $2^{64}$ 个block.
+	\item block group 是连续的block，默认为32768个block. \index{block group}
+	      ext4会利用block group来提高局部性.
+\end{itemize}
+值得注意的是，在引用内存中的数据时，指针为按字节寻址的地址，
+也就是引用对象的第一个字节的字节数；
+而在外存中，存储单元为block，所以指针均为block number.
+还有一点，因为文件系统不应依赖CPU的类型，
+所以应该定义好所有的数据的字节序.
+ext4中除日志外的数据均为little-endian.
+
+\subsubsection{文件的组织形式}
+文件的数据部分存储在数据block中，而要想把数据block组织成一个文件，
+还需要一些辅助用的block.
+ext4的空间分配方式为索引式，也就是组成文件的块可以不连续，
+用inode来索引分配给文件的块.
+inode 其实就表示了文件的连续的逻辑块号到不连续的物理块号的一个映射，
+和页表在虚拟内存中的作用类似.
+
+inode中存有文件的元数据和一些能够索引到数据block的数据结构.
+普通的索引方式是直接或间接地存储每一个block的指针.
+直接索引的block有12个（\lstinline{EXT4_NDIR_BLOCK}），
+这12个指针的后面是3个指向间接索引块的指针，
+分别为一级、二级和三级间接索引.
+15个指针共有60个字节，存放在 \lstinline{i_block} 字段中.
+小的文件不需要间接索引块，而如果文件的数据块超过12个，
+就需要分配间接索引块，若一级间接索引仍不够再依次使用二级索引、三级索引.
+若block大小为4 KB，则每一个间接块可以存放32位指针
+（这里只能用32位的block nunber）的数量为 $4\times2^{10}/4 = 2^{10}$.
+故全部的二级索引块可以索引 $2^{10}\times2^{10}\times\SI{4}{\kilo\byte} = \SI{4}{\giga\byte}$.
+可以看出，只有数GB的文件才要用到三级间接索引.
+
+另外一种方式是extent.
+这是一种介于连续分配和索引之间的组织方式，可以弥补两者的不足.
+分配时，尽量分配连续的block，但是确实无法分配连续的空间时，
+也可以用分开的若干个连续区域来存储，每一个连续的空间称为一个extent. \index{extent}
+为了在连续的逻辑块号和这样的部分连续的物理块号之间建立索引，
+Linux采用的是extent tree，一种类似于B+ 树的索引结构.
+我们在数据结构课上学过，B+ 树是一种多分支的自平衡树，
+树中的元素都是叶子节点，非叶子节点只用于索引，
+extent tree 也是这样.
+每一个extent 记录起始块号和长度，树的叶子节点就是extent.
+索引方式下存储指针的位置，
+extent方式则存放extent树.
+extent树的每一个节点都有一个header描述这个节点可索引多少个extent，
+已经有多少extent等信息.
+如果inode的那60个字节可以放下一个header和所有extent，
+则不需更多块来存放节点.
+如果放不下，则要使用索引节点来间接指向extent.\cite{Ext4Extent}
+
+\lstinline{i_block} 的60个字节除了存放块索引和extent tree，\index{extent tree}
+还可以存放符号链接的目标路径，若存不下，还需分配更多空间.
+
+目录也是文件的一种，同样由inode索引.
+与其他文件不同的是，目录文件的数据块存放的是目录中每一个文件或目录的条目，
+ext4中，每一个文件的目录条目包含：
+\begin{itemize}
+	\item 文件名字符数组、文件名长度（不超过255）；
+	\item 文件的inode号；
+	\item 文件类型；
+\end{itemize}
+其中文件类型也在inode中存在，在目录条目复制一份的好处是，
+查看目录下所有文件类型时无需访问每一个文件的inode，
+只需要查看所有条目即可.\cite{ext4dynamic}
+目录条目除了顺序存储，还可以组织成更复杂但高效的htree（hashed btree）. \index{htree}
+在这种组织形式下，用名字访问文件的时间复杂度更低，
+只需用文件名的散列值作为索引在B树中搜索.
+
+\begin{qbox}{ext4文件系统与ext3、ext2有什么改进？}
+	ext4、ext3、ext2都是同一个系列的文件系统，
+	是对Minix的文件系统的改进和扩展（\textbf{E}xtented file system).
+	ext3文件系统增加了日志功能.
+	ext4文件系统则新增了一些功能，提升了一点性能，减少了一些限制.
+	上文就提到了几处ext4的改进之处：
+	新增了extent方式的文件组织形式、
+	在目录条目里面存储文件类型.
+\end{qbox}
+
+\begin{readsrcbox}{\lstinline{struct ext4_inode}}
+	ext4的主要代码在 \linuxsrc{fs/ext4} 目录中.
+	\linuxsrc{fs/ext4/ex4.h} 定义了ext4的inode在磁盘上的布局 \lstinline{struct ext4_inode}，和在内存中的表示形式 \lstinline{struct ext4_inode_info}.
+
+	\lstinline{struc ext4_inode} 中的
+	\lstinline{__le32 i_block[EXT4_N_BLOCKS]}
+	就是存放上述有关索引数据的60个字节.
+
+	关于多层间接索引的inode的使用，
+	可参考的逻辑块号到索引块内偏移的代码：
+	\linuxsrc{fs/ext4/indirect.c} 中的 \lstinline{ext4_block_to_path()}.
+
+	Extent tree 的实现见 \linuxsrc{fs/ext4/ext4_extents.h} 等相关文件.
+	\lstinline{struct ext4_extent} 是记录extent位置的描述符，也是叶子节点.
+	\lstinline{struct ext4_extent_idx} 是非叶子节点.
+\end{readsrcbox}
+
+\subsubsection{磁盘上的物理布局}
+\ref{fs units} 中提到了几种存储单位，其中block是存储的基本单位，
+sector是与磁盘交流用的单位，而block group是文件系统整体组织的单位.
+整个磁盘被分为若干block group，
+动态分配空间时，总的原则是提高局部性，尽量把相关的结构分配在同一个block group中，
+因此每一个block group “麻雀虽小，五脏俱全”，都是相同的布局\cite{ext4high}：
+\begin{enumerate}
+	\item 一个整个文件系统的superblock. \index{superblock}
+	      每一个block group都存一个一样的文件系统控制块，
+	      减小文件系统关键信息丢失，完全不可恢复的概率.
+	\item Group 描述符表，所有block group 的描述符的数组. \index{group descriptor}
+	      也是重复地记录在每个group中.
+	      其后有一段保留的空间，用于在扩大文件系统时写更多的group 描述符.
+	\item 数据block的bitmap. 每一位对应一个data block是否空闲.
+	\item inode 的bitmap. 每一位记录inode是否空闲.
+	\item inode 表.
+	      固定数量的inode数组，所有inode（在使用的和空闲的）都在这里.
+	\item 数据block，间接索引block，extent tree block 等等.
+\end{enumerate}
+其中，group 描述符存储在group表中，每一个描述符对应一个group，
+存放就是其他几个控制用的数据结构的位置：
+inode和数据block的bitmap、inode表.
+因此，只要找到了group描述符表，就可以找到group描述符，
+进而确定其他所有控制信息的位置，访问整个文件系统的信息就找全了.
+这样也给了布局很大的灵活性，只有group 描述符表是固定的，
+其他的信息都可以不固定，这基础上group的组织可以更加灵活.\cite{ext4global}
+
+了解了磁盘上存放的控制信息，我们就知道了如何从逻辑上的号码访问物理上的位置，
+以及如何从物理地址推出逻辑上的结构.
+所要做的就是一层层查找表和描述符，计算一些偏移量，跟随若干次指针.
+
+\subsection{文件系统的安全}
+为了保证文件系统的安全，除了要管理好文件的权限，
+还要做好系统完整性的检查，最好还能从故障中恢复.
+
+ext4的inode存有文件拥有者的标识符，并且在扩展的属性中记录了访问控制列表（ACL），
+作为Unix文件权限的补充，提供更精细的权限控制.
+
+ext4的所有数据结构如superblock、inode、group描述符等
+都支持校验，所有的元数据都可以算出校验和与存储的校验和进行比较，
+从而发现文件系统中是否有完整性错误.\cite{ext4high}
+
+另外，ext4还支持写日志的功能.
+我们已经看到，与 LFS \cite{rosenblum1992design}这种基于日志的文件系统不同，
+ext4的文件并不以日志的形式保存.
+ext4的日志功能jbd2完全是为了在系统故障后进行恢复而设计的，
+因而日志功能与文件系统的主体可以分离，用户也可以选择启用或者不启用日志功能.
+日志在ext4中也是以普通的文件的方式存储，也有inode，只不过对文件系统是隐藏的.
+默认设置下，日志只写元数据.
+每次文件系统的状态发生的改变需要保证原子性时，改变都会先被写到日志里，然后才会被真正执行.
+若由于系统故障，操作未能完成，文件系统可以重放日志里的记录来尝试恢复完整性.
+
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: "linux_zh"
+%%% End:
