@@ -5,10 +5,6 @@
 ```shell
 latexmk
 ```
-
-## Release
-[PDF](https://github.com/MikeWalrus/linux-report/releases)
-
 ## 内容
 + [历史](history_zh.tex)
 + [进程管理](task_zh.tex)
